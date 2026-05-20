@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -121,9 +121,8 @@
         { distance: 6500, colors: ['#8b0000', '#ff4500', '#ffd700'], stars: '#ffff00' },     // 노란색 (7000m+)
     ];
 
-    // 현재 우주 배경 상태
     let currentZone = 0;
-    let zoneProgress = 0; // 0~1 사이의 값 (다음 존으로의 진행도)
+    let zoneProgress = 0; 
 
     // --- 로켓 구조체 ---
     let rocket = {
@@ -146,6 +145,9 @@
     // --- 장애물(운석) 관리 ---
     let obstacles = [];
     let spawnTimer = 0;
+    let giantMeteorTimer = 0; // 거대 운석 타이머 추가
+    let giantWarningActive = false; // 경고 연출 활성화 여부
+    let giantWarningX = 0; // 거대 운석이 떨어질 X 좌표 위치 표시용
 
     // --- 조작키 상태 ---
     let keys = { ArrowLeft: false, ArrowRight: false, ArrowUp: false };
@@ -155,14 +157,12 @@
 
     // --- 우주 존 업데이트 함수 ---
     function updateSpaceZone() {
-        // 거리에 따라 현재 존 결정
         for (let i = spaceZones.length - 1; i >= 0; i--) {
             if (distance >= spaceZones[i].distance) {
                 if (i < spaceZones.length - 1) {
-                    // 다음 존으로의 진행도 계산
                     let nextZoneDistance = spaceZones[i + 1].distance;
                     zoneProgress = (distance - spaceZones[i].distance) / (nextZoneDistance - spaceZones[i].distance);
-                    zoneProgress = Math.min(1, Math.max(0, zoneProgress)); // 0~1 범위로 제한
+                    zoneProgress = Math.min(1, Math.max(0, zoneProgress)); 
                     currentZone = i;
                 } else {
                     zoneProgress = 1;
@@ -193,12 +193,10 @@
         return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
     }
 
-    // --- 현재 배경 색상 반환 함수 ---
     function getCurrentBackgroundColor() {
         const zone = spaceZones[currentZone];
         if (currentZone < spaceZones.length - 1) {
             const nextZone = spaceZones[currentZone + 1];
-            // 두 존 사이에서 보간
             const color1 = interpolateColor(zone.colors[0], zone.colors[1], 0.5);
             const color2 = interpolateColor(nextZone.colors[0], nextZone.colors[1], 0.5);
             return interpolateColor(color1, color2, zoneProgress);
@@ -215,7 +213,6 @@
             let speedBonus = keys.ArrowUp && rocket.fuel > 0 ? 2 : 1;
             distance += 0.2 * speedBonus;
 
-            // 우주 존 업데이트
             updateSpaceZone();
 
             if (rocket.fuel <= 0) {
@@ -244,42 +241,62 @@
                 rocket.y += 3;
             }
 
-            // 4. 장애물 생성
+            // 4. 장애물 생성 (거리에 따라 타이머 단축 = 난이도 증가)
             spawnTimer++;
-            let spawnInterval = Math.max(20, 60 - Math.floor(distance * 0.05));
+            let spawnInterval = Math.max(12, 50 - Math.floor(distance * 0.08)); 
             if (spawnTimer > spawnInterval) {
                 spawnObstacle();
                 spawnTimer = 0;
             }
 
+            // [추가] 거대 운석 주기적 생성 엔진 (500m 이상부터 발동)
+            if (distance > 500) {
+                giantMeteorTimer++;
+                // 약 10~15초마다 한 번씩 경고 띄우고 등장
+                if (giantMeteorTimer === 500) {
+                    giantWarningActive = true;
+                    giantWarningX = Math.random() * (canvas.width - 150); // 거대운석 가로 크기 고려
+                }
+                if (giantMeteorTimer >= 600) { // 경고 100프레임(약 1.6초) 후 스폰
+                    spawnGiantMeteor(giantWarningX);
+                    giantMeteorTimer = 0;
+                    giantWarningActive = false;
+                }
+            }
+
             // 5. 장애물 업데이트 및 충돌 체크
+            // 거리에 따라 기본 추가 속도 부여 (distance * 0.015) -> 내려오는 속도 빨라짐
+            let difficultySpeedBonus = Math.min(8, distance * 0.015);
+
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let obs = obstacles[i];
                 
-                // 장애물 타입별 움직임
-                if (obs.type === 'fast') {
-                    obs.y += (obs.speed + 3) + Math.min(5, distance * 0.01);
+                if (obs.type === 'giant') {
+                    obs.y += obs.speed + (difficultySpeedBonus * 0.5); // 거대 운석은 자체 무게감 조절
+                } else if (obs.type === 'fast') {
+                    obs.y += (obs.speed + 4) + difficultySpeedBonus;
                 } else if (obs.type === 'sway') {
-                    obs.y += obs.speed + Math.min(5, distance * 0.01);
+                    obs.y += obs.speed + difficultySpeedBonus;
                     obs.swayTimer = (obs.swayTimer || 0) + 1;
-                    obs.x += Math.sin(obs.swayTimer * 0.1) * 2;
+                    obs.x += Math.sin(obs.swayTimer * 0.12) * 2.5;
                     
                     if (obs.x < 0) obs.x = 0;
                     if (obs.x + obs.size > canvas.width) obs.x = canvas.width - obs.size;
                 } else {
-                    obs.y += obs.speed + Math.min(5, distance * 0.01);
+                    obs.y += obs.speed + difficultySpeedBonus;
                 }
 
-                if (obs.y > canvas.height) {
+                if (obs.y > canvas.height + obs.size) {
                     obstacles.splice(i, 1);
                     continue;
                 }
 
-                // 충돌 체크
-                if (rocket.x < obs.x + obs.size &&
-                    rocket.x + rocket.width > obs.x &&
-                    rocket.y < obs.y + obs.size &&
-                    rocket.y + rocket.height > obs.y) {
+                // 충돌 체크 (원형 충돌 혹은 히트박스 판정 보정)
+                let hitBuffer = obs.type === 'giant' ? 15 : 2; // 거대 운석은 조금의 자비심 버퍼 제공
+                if (rocket.x < obs.x + obs.size - hitBuffer &&
+                    rocket.x + rocket.width > obs.x + hitBuffer &&
+                    rocket.y < obs.y + obs.size - hitBuffer &&
+                    rocket.y + rocket.height > obs.y + hitBuffer) {
                     explodeRocket();
                 }
             }
@@ -289,12 +306,11 @@
         requestAnimationFrame(update);
     }
 
-    // --- 장애물 생성 함수 ---
+    // --- 일반 장애물 생성 함수 ---
     function spawnObstacle() {
         let size = Math.random() * 20 + 20;
-        
         let obstacleType = 'normal';
-        let difficultyChance = Math.min(0.6, distance * 0.001);
+        let difficultyChance = Math.min(0.7, distance * 0.0012);
         
         if (Math.random() < difficultyChance) {
             let typeRoll = Math.random();
@@ -315,6 +331,18 @@
         });
     }
 
+    // [추가] 거대 운석 생성 함수
+    function spawnGiantMeteor(targetX) {
+        obstacles.push({
+            x: targetX,
+            y: -160,
+            size: 150, // 엄청나게 큰 크기
+            speed: 5,  // 묵직하고 빠른 기본 속도
+            type: 'giant',
+            swayTimer: 0
+        });
+    }
+
     // --- 발사 버튼 ---
     function launchRocket() {
         if (gameState !== 'ready') return;
@@ -324,6 +352,8 @@
         currentZone = 0;
         zoneProgress = 0;
         obstacles = [];
+        giantMeteorTimer = 0;
+        giantWarningActive = false;
         rocket.x = canvas.width / 2 - rocket.width / 2;
         rocket.y = 500;
         rocket.maxFuel = upgrades.fuel.maxFuel + (upgrades.fuel.level - 1) * 50;
@@ -368,7 +398,6 @@
         return Math.floor(upgrades[type].baseCost * Math.pow(1.4, upgrades[type].level - 1));
     }
 
-    // --- UI 동기화 ---
     function updateUI() {
         document.getElementById('gold-txt').innerText = gold;
         document.getElementById('highscore-txt').innerText = highScore;
@@ -388,12 +417,10 @@
 
     // --- 그래픽 렌더링 ---
     function render() {
-        // 현재 배경 색상 적용
         let bgColor = getCurrentBackgroundColor();
         ctx.fillStyle = bgColor;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 동적 그라데이션 배경 추가 (깊이감)
         let gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
         let zone = spaceZones[currentZone];
         gradient.addColorStop(0, zone.colors[0]);
@@ -402,19 +429,42 @@
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 1. 별 연출 (색상도 동적 변경)
+        // 1. 별 연출
         ctx.fillStyle = zone.stars;
         let starSpeed = keys.ArrowUp && rocket.fuel > 0 ? 8 : 3;
         for (let i = 0; i < 25; i++) {
             let starY = (i * 45 + distance * (starSpeed * 2)) % canvas.height;
             let starX = (i * 87) % canvas.width;
-            let starSize = 1 + Math.sin(i * 0.5) * 0.5; // 별이 반짝이는 효과
+            let starSize = 1 + Math.sin(i * 0.5) * 0.5;
             ctx.fillRect(starX, starY, starSize, starSize);
+        }
+
+        // [추가] 거대 운석 경고 레이저 선 연출
+        if (gameState === 'flying' && giantWarningActive) {
+            ctx.strokeStyle = Math.floor(Date.now() / 100) % 2 === 0 ? 'rgba(255, 0, 0, 0.6)' : 'rgba(255, 0, 0, 0.1)';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(giantWarningX, 0, 150, canvas.height);
+            
+            // 경고 텍스트 박스
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
+            ctx.fillRect(giantWarningX + 15, 80, 120, 30);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ 거대운석 접근!', giantWarningX + 75, 100);
+            ctx.textAlign = 'start'; // 리셋
         }
 
         // 2. 장애물 그리기
         obstacles.forEach(obs => {
-            if (obs.type === 'fast') {
+            if (obs.type === 'giant') {
+                // 거대 운석 마그마 느낌의 붉은 그라데이션 적용
+                let gRad = ctx.createRadialGradient(obs.x + obs.size/2, obs.y + obs.size/2, 10, obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2);
+                gRad.addColorStop(0, '#ff4500');
+                gRad.addColorStop(0.6, '#4a3728');
+                gRad.addColorStop(1, '#1c1510');
+                ctx.fillStyle = gRad;
+            } else if (obs.type === 'fast') {
                 ctx.fillStyle = '#fc8181';
             } else if (obs.type === 'sway') {
                 ctx.fillStyle = '#fbd38d';
@@ -426,29 +476,67 @@
             ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2, 0, Math.PI * 2);
             ctx.fill();
             
-            ctx.fillStyle = '#4a5568';
+            // 디테일(크레이터 구멍 효과) - 거대운석은 3개 배치
+            ctx.fillStyle = obs.type === 'giant' ? '#1c1510' : '#4a5568';
             ctx.beginPath();
             ctx.arc(obs.x + obs.size*0.3, obs.y + obs.size*0.4, obs.size*0.15, 0, Math.PI * 2);
             ctx.fill();
+
+            if (obs.type === 'giant') {
+                ctx.beginPath();
+                ctx.arc(obs.x + obs.size*0.7, obs.y + obs.size*0.3, obs.size*0.12, 0, Math.PI * 2);
+                ctx.arc(obs.x + obs.size*0.5, obs.y + obs.size*0.7, obs.size*0.18, 0, Math.PI * 2);
+                ctx.fill();
+            }
         });
 
-        // 3. 로켓 그리기
+        // 3. 로켓 및 부스터 불꽃 그리기
         if (gameState !== 'gameOver') {
             let rx = rocket.x;
             let ry = rocket.y;
 
             if (gameState === 'flying' && rocket.fuel > 0) {
-                ctx.fillStyle = Math.random() > 0.4 ? '#f6e05e' : '#ed8936';
-                ctx.beginPath();
-                ctx.moveTo(rx + 4, ry + rocket.height);
-                ctx.lineTo(rx + rocket.width/2, ry + rocket.height + (keys.ArrowUp ? 25 : 12) + Math.random()*8);
-                ctx.lineTo(rx + rocket.width - 4, ry + rocket.height);
-                ctx.fill();
+                if (keys.ArrowUp) {
+                    // [변경] 부스터 ON: 초강력 삼중 불꽃 이펙트
+                    let flameHeight = 35 + Math.random() * 15;
+                    let fGrad = ctx.createLinearGradient(rx, ry + rocket.height, rx, ry + rocket.height + flameHeight);
+                    fGrad.addColorStop(0, '#ffffff');
+                    fGrad.addColorStop(0.2, '#ffeb3b');
+                    fGrad.addColorStop(0.5, '#ff9800');
+                    fGrad.addColorStop(1, 'rgba(244, 67, 54, 0)');
+                    
+                    ctx.fillStyle = fGrad;
+                    ctx.beginPath();
+                    ctx.moveTo(rx - 2, ry + rocket.height);
+                    ctx.lineTo(rx + rocket.width/2, ry + rocket.height + flameHeight);
+                    ctx.lineTo(rx + rocket.width + 2, ry + rocket.height);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // 부스터 보조 불꽃 입자 효과 추가 느낌의 내부 심지
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.moveTo(rx + 5, ry + rocket.height);
+                    ctx.lineTo(rx + rocket.width/2, ry + rocket.height + flameHeight * 0.5);
+                    ctx.lineTo(rx + rocket.width - 5, ry + rocket.height);
+                    ctx.closePath();
+                    ctx.fill();
+                } else {
+                    // 기본 비행 불꽃 (기존 상태 유지)
+                    ctx.fillStyle = Math.random() > 0.4 ? '#f6e05e' : '#ed8936';
+                    ctx.beginPath();
+                    ctx.moveTo(rx + 4, ry + rocket.height);
+                    ctx.lineTo(rx + rocket.width/2, ry + rocket.height + 12 + Math.random()*8);
+                    ctx.lineTo(rx + rocket.width - 4, ry + rocket.height);
+                    ctx.fill();
+                }
             }
 
+            // 로켓 몸체
             ctx.fillStyle = '#edf2f7';
             ctx.fillRect(rx, ry + 10, rocket.width, rocket.height - 10);
 
+            // 로켓 머리 노즐
             ctx.fillStyle = '#e53e3e';
             ctx.beginPath();
             ctx.moveTo(rx, ry + 10);
@@ -456,6 +544,7 @@
             ctx.lineTo(rx + rocket.width, ry + 10);
             ctx.fill();
 
+            // 로켓 날개
             ctx.fillStyle = '#4a5568';
             ctx.fillRect(rx - 6, ry + rocket.height - 15, 6, 15);
             ctx.fillRect(rx + rocket.width, ry + rocket.height - 15, 6, 15);
