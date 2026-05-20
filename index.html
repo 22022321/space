@@ -109,14 +109,15 @@
     let gold = 300; 
     let highScore = 0;
     let distance = 0;
+    let eventGoldEarned = 0; // 한 판 동안 코인으로 먹은 추가 골드
 
     // --- 우주 배경 색상 정의 ---
     const spaceZones = [
-        { distance: 0, colors: ['#05070a', '#131326'], stars: '#ffffff' },       // 0m ~ 250m
-        { distance: 250, colors: ['#0f172a', '#1e3a8a'], stars: '#87ceeb' },     // 250m ~ 750m
-        { distance: 750, colors: ['#1e1b4b', '#4c1d95'], stars: '#ff69b4' },     // 750m ~ 1500m
-        { distance: 1500, colors: ['#3b0764', '#701a75'], stars: '#dda0dd' },    // 1500m ~ 3000m
-        { distance: 3000, colors: ['#450a0a', '#991b1b'], stars: '#ff1493' },    // 3000m+
+        { distance: 0, colors: ['#05070a', '#131326'], stars: '#ffffff' },       
+        { distance: 250, colors: ['#0f172a', '#1e3a8a'], stars: '#87ceeb' },     
+        { distance: 750, colors: ['#1e1b4b', '#4c1d95'], stars: '#ff69b4' },     
+        { distance: 1500, colors: ['#3b0764', '#701a75'], stars: '#dda0dd' },    
+        { distance: 3000, colors: ['#450a0a', '#991b1b'], stars: '#ff1493' },    
     ];
 
     let currentZone = 0;
@@ -138,13 +139,22 @@
         booster: { level: 1, baseCost: 150, pushY: 8 }
     };
 
-    // --- 장애물 관리 ---
+    // --- 장애물 및 아이템 관리 ---
     let obstacles = [];
     let spawnTimer = 0;
-    let debrisTimer = 0; // 우주 쓰레기 생성 타이머
+    let debrisTimer = 0; 
     let giantMeteorTimer = 0; 
     let giantWarningActive = false; 
     let giantWarningX = 0; 
+
+    // --- 돌발 이벤트 시스템 상태 변수 ---
+    let currentEvent = 'none'; // 'none', 'solarWind', 'meteorShower', 'goldBelt'
+    let eventTimer = 0;
+    let eventTextAlpha = 0;
+    let eventTextMsg = '';
+    
+    // 이벤트를 한 번만 발생시키기 위한 플래그
+    let eventTriggered = { solar: false, shower: false, gold: false };
 
     // --- 파티클(폭발 효과) 배열 ---
     let particles = [];
@@ -164,75 +174,145 @@
         }
     }
 
+    // --- 돌발 이벤트 체크 함수 ---
+    function checkRandomEvents(displayMeters) {
+        if (currentEvent !== 'none') {
+            eventTimer--;
+            if (eventTimer <= 0) {
+                currentEvent = 'none';
+            }
+            return;
+        }
+
+        // 1. 400m 진입 시: 태양풍 발생 (13초)
+        if (displayMeters >= 400 && !eventTriggered.solar) {
+            currentEvent = 'solarWind';
+            eventTimer = 780; // 60fps * 13초
+            eventTextAlpha = 1;
+            eventTextMsg = '⚠️ 태양풍 경보! 조작계가 교란됩니다!';
+            eventTriggered.solar = true;
+        }
+        // 2. 900m 진입 시: 미테오 샤워 발생 (10초)
+        else if (displayMeters >= 900 && !eventTriggered.shower) {
+            currentEvent = 'meteorShower';
+            eventTimer = 600; // 60fps * 10초
+            eventTextAlpha = 1;
+            eventTextMsg = '✨ 미테오 샤워! 연료 무한 가속 돌입!';
+            eventTriggered.shower = true;
+        }
+        // 3. 1600m 진입 시: 골드 소행성대 진입 (12초)
+        else if (displayMeters >= 1600 && !eventTriggered.gold) {
+            currentEvent = 'goldBelt';
+            eventTimer = 720; // 60fps * 12초
+            eventTextAlpha = 1;
+            eventTextMsg = '💰 골드 소행성대 진입! 운석 소멸!';
+            eventTriggered.gold = true;
+            obstacles = []; // 기존 장애물 제거
+        }
+    }
+
     function update() {
         let displayMeters = Math.floor(distance);
 
         if (gameState === 'flying') {
-            rocket.fuel -= 0.1;
+            // [미테오 샤워] 이벤트 중에는 연료 소모 안 됨
+            if (currentEvent !== 'meteorShower') {
+                rocket.fuel -= 0.1;
+            }
             
             let speedBonus = keys.ArrowUp && rocket.fuel > 0 ? 2 : 1;
             distance += 0.15 * speedBonus; 
 
             updateSpaceZone();
+            checkRandomEvents(displayMeters);
 
             if (rocket.fuel <= 0) rocket.fuel = 0;
 
+            // 로켓 좌우 조작
             let currentMoveSpeed = upgrades.engine.speed + (upgrades.engine.level - 1) * 0.8;
-            if (keys.ArrowLeft && rocket.x > 0) rocket.x -= currentMoveSpeed;
-            if (keys.ArrowRight && rocket.x < canvas.width - rocket.width) rocket.x += currentMoveSpeed;
+            
+            // [태양풍 이벤트] 조작 반전 처리
+            if (currentEvent === 'solarWind') {
+                if (keys.ArrowLeft && rocket.x < canvas.width - rocket.width) rocket.x += currentMoveSpeed;
+                if (keys.ArrowRight && rocket.x > 0) rocket.x -= currentMoveSpeed;
+            } else {
+                if (keys.ArrowLeft && rocket.x > 0) rocket.x -= currentMoveSpeed;
+                if (keys.ArrowRight && rocket.x < canvas.width - rocket.width) rocket.x += currentMoveSpeed;
+            }
 
+            // 로켓 위 조작 (부스터)
             let boosterLimit = 450 - (upgrades.booster.level * 15);
             if (keys.ArrowUp && rocket.fuel > 0 && rocket.y > Math.max(100, boosterLimit)) {
                 rocket.y -= 3;
-                rocket.fuel -= 0.05;
+                if (currentEvent !== 'meteorShower') rocket.fuel -= 0.05;
             } else if (rocket.y < 500) {
                 rocket.y += 2;
             }
 
             if (rocket.fuel <= 0 && rocket.y < 500) rocket.y += 3;
 
-            // [기본 운석] 생성 루프
+            // --- 장애물 및 아이템 스폰 타이머 설정 ---
             spawnTimer++;
+            debrisTimer++;
+
             let spawnInterval = Math.max(12, 50 - Math.floor(displayMeters * 0.02)); 
-            if (spawnTimer > spawnInterval) {
-                spawnObstacle();
-                spawnTimer = 0;
+            let debrisInterval = Math.max(20, 70 - Math.floor(displayMeters * 0.01));
+
+            // [미테오 샤워] 이벤트 시 스폰 속도 폭발적 증가
+            if (currentEvent === 'meteorShower') {
+                spawnInterval = 4;
+                debrisInterval = 8;
             }
 
-            // [신규: 우주 쓰레기 패턴] 400m 이상부터 좌우에서 빠르게 등장
-            if (displayMeters > 400) {
-                debrisTimer++;
-                let debrisInterval = Math.max(40, 100 - Math.floor(displayMeters * 0.01));
-                if (debrisTimer > debrisInterval) {
-                    spawnSpaceDebris();
+            if (currentEvent === 'goldBelt') {
+                // [골드 소행성대] 이벤트 시 징벌 장애물 안 나오고 코인만 스폰
+                if (spawnTimer > 10) {
+                    spawnGoldCoin();
+                    spawnTimer = 0;
+                }
+            } else {
+                // 일반 상황 또는 다른 이벤트 상황
+                if (spawnTimer > spawnInterval) {
+                    spawnObstacle();
+                    spawnTimer = 0;
+                }
+                if (displayMeters > 300 && debrisTimer > debrisInterval) {
+                    spawnSpaceDebris(); // 위에서 아래로 떨어지게 개조된 우주 쓰레기
                     debrisTimer = 0;
                 }
             }
 
-            // [거대 운석] 생성 루프 (250m 이상 작동)
-            if (displayMeters > 250) {
+            // [거대 운석] 생성 루프 (250m 이상 & 골드벨트가 아닐 때만 작동)
+            if (displayMeters > 250 && currentEvent !== 'goldBelt') {
                 giantMeteorTimer++;
-                if (giantMeteorTimer === 450) {
+                // 미테오 샤워 중에는 거대 운석이 더 자주 등장
+                let giantTriggerTime = currentEvent === 'meteorShower' ? 250 : 450;
+                if (giantMeteorTimer === giantTriggerTime - 90) {
                     giantWarningActive = true;
                     giantWarningX = Math.random() * (canvas.width - 150); 
                 }
-                if (giantMeteorTimer >= 540) { 
+                if (giantMeteorTimer >= giantTriggerTime) { 
                     spawnGiantMeteor(giantWarningX);
                     giantMeteorTimer = 0;
                     giantWarningActive = false;
                 }
+            } else {
+                giantWarningActive = false;
             }
 
-            // 장애물 이동 및 충돌 검사
+            // 장애물/아이템 이동 및 충돌 검사
             let difficultySpeedBonus = Math.min(8, displayMeters * 0.003);
+            if (currentEvent === 'meteorShower') difficultySpeedBonus += 4; // 미테오 샤워 전용 추가 가속
 
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let obs = obstacles[i];
                 
-                if (obs.type === 'debris') {
-                    // 우주 쓰레기는 가로로 이동
-                    obs.x += obs.vx;
-                    obs.y += obs.vy + difficultySpeedBonus * 0.3; // 미세하게 하강
+                // 전원 위에서 아래로 하강
+                if (obs.type === 'coin') {
+                    obs.y += 4; // 코인 낙하 속도
+                } else if (obs.type === 'debris') {
+                    obs.y += obs.speed + difficultySpeedBonus;
+                    obs.rotation += obs.rotSpeed; // 고철 파편 회전 회전축 누적
                 } else if (obs.type === 'giant') {
                     obs.y += obs.speed + (difficultySpeedBonus * 0.5); 
                 } else if (obs.type === 'fast') {
@@ -247,38 +327,45 @@
                     obs.y += obs.speed + difficultySpeedBonus;
                 }
 
-                // 화면 밖으로 완전히 벗어나면 소멸 처리
-                if (obs.y > canvas.height + obs.size || obs.x < -obs.size - 50 || obs.x > canvas.width + obs.size + 50) {
+                // 화면 아래로 탈출 시 삭제
+                if (obs.y > canvas.height + obs.size) {
                     obstacles.splice(i, 1);
                     continue;
                 }
 
                 // 충돌 판정 계산
-                let hitBuffer = obs.type === 'giant' ? 15 : 2; 
+                let hitBuffer = obs.type === 'giant' ? 15 : (obs.type === 'coin' ? -5 : 2); 
                 if (rocket.x < obs.x + obs.size - hitBuffer &&
                     rocket.x + rocket.width > obs.x + hitBuffer &&
                     rocket.y < obs.y + obs.size - hitBuffer &&
                     rocket.y + rocket.height > obs.y + hitBuffer) {
-                    triggerExplosion(rocket.x + rocket.width / 2, rocket.y + rocket.height / 2);
+                    
+                    if (obs.type === 'coin') {
+                        // 코인을 먹은 경우
+                        eventGoldEarned += 25; // 개당 25골드 획득
+                        obstacles.splice(i, 1);
+                    } else {
+                        // 장애물 충돌 시 파티클 폭발 발생
+                        triggerExplosion(rocket.x + rocket.width / 2, rocket.y + rocket.height / 2);
+                    }
                 }
             }
         }
 
-        // [신규: 폭발 상태] 파티클 업데이트 로직
+        // [폭발 연출 상태] 파티클 업데이트 로직
         if (gameState === 'exploding') {
             for (let i = particles.length - 1; i >= 0; i--) {
                 let p = particles[i];
                 p.x += p.vx;
                 p.y += p.vy;
                 p.alpha -= p.decay;
-                p.size *= 0.98; // 서서히 작아짐
+                p.size *= 0.98; 
 
                 if (p.alpha <= 0 || p.size <= 0.5) {
                     particles.splice(i, 1);
                 }
             }
 
-            // 모든 파편이 사라지면 최종 점수 팝업창 호출 및 대기방 이동
             if (particles.length === 0) {
                 endGame();
             }
@@ -310,21 +397,27 @@
         });
     }
 
-    // [신규] 우주 쓰레기 생성 함수 (가로 일직선 이동 파편)
+    // [개조] 우주 쓰레기가 이제 운석처럼 위에서 아래로 떨어집니다.
     function spawnSpaceDebris() {
-        let size = Math.random() * 12 + 10; // 기존 운석보다 다소 작고 날카로움 부각
-        let fromLeft = Math.random() > 0.5;
-        let startX = fromLeft ? -size : canvas.width;
-        let startY = Math.random() * (canvas.height - 250) + 50; // 중상단 위주 스폰
-        let speedX = (Math.random() * 3 + 4) * (fromLeft ? 1 : -1); // 매우 빠른 가로 속도
-
+        let size = Math.random() * 12 + 12; 
         obstacles.push({
-            x: startX,
-            y: startY,
+            x: Math.random() * (canvas.width - size),
+            y: -size,
             size: size,
-            vx: speedX,
-            vy: Math.random() * 1 - 0.5, // 위아래 미세 흔들림
+            speed: Math.random() * 3 + 5, // 일반 운석보다 낙하 속도가 다소 빠름
+            rotation: Math.random() * Math.PI,
+            rotSpeed: Math.random() * 0.08 - 0.04, // 떨어지면서 좌우 무작위 회전
             type: 'debris'
+        });
+    }
+
+    // [신규] 골드 코인 스폰 함수
+    function spawnGoldCoin() {
+        obstacles.push({
+            x: Math.random() * (canvas.width - 20),
+            y: -20,
+            size: 20,
+            type: 'coin'
         });
     }
 
@@ -339,12 +432,10 @@
         });
     }
 
-    // [신규] 파티클 폭발 시작 연출 활성화 함수
     function triggerExplosion(ex, ey) {
         gameState = 'exploding';
         particles = [];
 
-        // 불꽃 및 연기 파편 45개 생성
         for (let i = 0; i < 45; i++) {
             let angle = Math.random() * Math.PI * 2;
             let speed = Math.random() * 6 + 2;
@@ -363,18 +454,19 @@
         }
     }
 
-    // [신규] 폭발이 다 끝나고 결과를 처리하는 마무리 함수
     function endGame() {
         gameState = 'gameOver';
         let finalScore = Math.floor(distance);
-        let earnedGold = Math.floor(finalScore * 0.8);
-        gold += earnedGold;
+        let baseGold = Math.floor(finalScore * 0.8);
+        let totalEarned = baseGold + eventGoldEarned;
+        gold += totalEarned;
 
         if (finalScore > highScore) highScore = finalScore;
 
-        alert(`💥 쿠우웅! 로켓이 산산조각 났습니다!\n\n비행 기록: ${finalScore}m\n획득 골드: ${earnedGold}G`);
+        alert(`💥 쿠우웅! 로켓이 파괴되었습니다!\n\n비행 기록: ${finalScore}m\n기본 보상: ${baseGold}G\n코인 보상: ${eventGoldEarned}G\n총 획득 골드: ${totalEarned}G`);
         
         gameState = 'ready';
+        currentEvent = 'none';
         document.getElementById('launch-btn').disabled = false;
         toggleUpgradeButtons(true);
         updateUI();
@@ -385,11 +477,16 @@
         gameState = 'flying';
         distance = 0;
         currentZone = 0;
+        eventGoldEarned = 0;
         obstacles = [];
         particles = [];
         giantMeteorTimer = 0;
         debrisTimer = 0;
         giantWarningActive = false;
+        
+        currentEvent = 'none';
+        eventTriggered = { solar: false, shower: false, gold: false };
+
         rocket.x = canvas.width / 2 - rocket.width / 2;
         rocket.y = 500;
         rocket.maxFuel = upgrades.fuel.maxFuel + (upgrades.fuel.level - 1) * 50;
@@ -430,16 +527,25 @@
     function render() {
         let zone = spaceZones[currentZone];
 
+        // 기본 배경 그라데이션
         let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-        gradient.addColorStop(0, zone.colors[0]);
-        gradient.addColorStop(1, zone.colors[1]);
+        
+        // [태양풍 이벤트] 발생 시 배경 스크린을 붉은색 필터 톤으로 연출
+        if (currentEvent === 'solarWind') {
+            gradient.addColorStop(0, '#3a0202');
+            gradient.addColorStop(1, '#130101');
+        } else {
+            gradient.addColorStop(0, zone.colors[0]);
+            gradient.addColorStop(1, zone.colors[1]);
+        }
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 별 흐르기 효과 (폭발 연출 중에는 흐름 일시 중지)
+        // 별 흐르기 효과
         ctx.fillStyle = zone.stars;
         let starSpeed = (gameState === 'flying' && keys.ArrowUp && rocket.fuel > 0) ? 8 : 3;
         if (gameState === 'exploding') starSpeed = 0;
+        if (currentEvent === 'meteorShower') starSpeed = 15; // 미테오 샤워 가속 연출
 
         for (let i = 0; i < 25; i++) {
             let starY = (i * 45 + distance * (starSpeed * 10)) % canvas.height;
@@ -448,7 +554,7 @@
             ctx.fillRect(starX, starY, starSize, starSize);
         }
 
-        // 거대운석 경고선
+        // 거대운석 레이저 경고선
         if (gameState === 'flying' && giantWarningActive) {
             ctx.strokeStyle = Math.floor(Date.now() / 100) % 2 === 0 ? 'rgba(255, 0, 0, 0.6)' : 'rgba(255, 0, 0, 0.1)';
             ctx.lineWidth = 4;
@@ -463,9 +569,22 @@
             ctx.textAlign = 'start'; 
         }
 
-        // 장애물 그리기
+        // 장애물 및 아이템 렌더링
         obstacles.forEach(obs => {
-            if (obs.type === 'giant') {
+            if (obs.type === 'coin') {
+                // [신규] 반짝이는 노란 황금 코인 디자인
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath();
+                ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#d97706';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // 코인 무늬 내장 원형
+                ctx.beginPath();
+                ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/4, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if (obs.type === 'giant') {
                 let gRad = ctx.createRadialGradient(obs.x + obs.size/2, obs.y + obs.size/2, 10, obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2);
                 gRad.addColorStop(0, '#ff4500');
                 gRad.addColorStop(0.6, '#4a3728');
@@ -475,13 +594,14 @@
                 ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2, 0, Math.PI * 2);
                 ctx.fill();
             } else if (obs.type === 'debris') {
-                // [신규] 우주 쓰레기는 사각형 파편 모양으로 날카롭게 묘사
+                // [개조] 위에서 떨어지며 실시간 회전하는 사각형 우주 고철 쓰레기
                 ctx.fillStyle = '#cbd5e1';
                 ctx.save();
                 ctx.translate(obs.x + obs.size/2, obs.y + obs.size/2);
-                ctx.rotate(distance * 0.05); // 빙글빙글 회전 효과
+                ctx.rotate(obs.rotation); 
                 ctx.fillRect(-obs.size/2, -obs.size/2, obs.size, obs.size * 0.6);
-                ctx.fillStyle = '#94a3b8';
+                ctx.strokeStyle = '#64748b';
+                ctx.lineWidth = 1.5;
                 ctx.strokeRect(-obs.size/2, -obs.size/2, obs.size, obs.size * 0.6);
                 ctx.restore();
             } else {
@@ -495,7 +615,7 @@
             }
         });
 
-        // [신규] 폭발 파티클 렌더링
+        // 폭발 파티클 렌더링
         if (gameState === 'exploding') {
             particles.forEach(p => {
                 ctx.save();
@@ -508,7 +628,7 @@
             });
         }
 
-        // 로켓 및 불꽃 그리기 (생존 상태일 때만 출력)
+        // 로켓 및 불꽃 그리기
         if (gameState === 'flying' || gameState === 'ready') {
             let rx = rocket.x;
             let ry = rocket.y;
@@ -546,10 +666,33 @@
             ctx.fillRect(rx + rocket.width, ry + rocket.height - 15, 6, 15);
         }
 
+        // [신규] 돌발 이벤트 대형 자막 알림 연출
+        if (gameState === 'flying' && currentEvent !== 'none' && eventTextAlpha > 0) {
+            ctx.save();
+            ctx.fillStyle = `rgba(255, 255, 255, ${eventTextAlpha})`;
+            ctx.font = 'bold 20px sans-serif';
+            ctx.shadowColor = 'black';
+            ctx.shadowBlur = 4;
+            ctx.textAlign = 'center';
+            ctx.fillText(eventTextMsg, canvas.width / 2, 220);
+            ctx.restore();
+
+            // 타이머가 끝나갈 때 자막 서서히 페이드아웃
+            if (eventTimer < 60) {
+                eventTextAlpha -= 0.02;
+            }
+        }
+
         let fuelPercent = Math.max(0, Math.ceil((rocket.fuel / rocket.maxFuel) * 100));
         document.getElementById('dist-txt').innerText = Math.floor(distance);
         document.getElementById('fuel-txt').innerText = fuelPercent;
-        document.getElementById('speed-txt').innerText = keys.ArrowUp && rocket.fuel > 0 ? "2X (부스터 가속!)" : "1X (기본)";
+        
+        // 보너스 속도 텍스트 UI 처리
+        let speedText = "1X (기본)";
+        if (keys.ArrowUp && rocket.fuel > 0) speedText = "2X (부스터 가속!)";
+        if (currentEvent === 'meteorShower') speedText += " + ✨초고속 무한질주!";
+        if (currentEvent === 'solarWind') speedText += " + ⚠️조작 역방향!!";
+        document.getElementById('speed-txt').innerText = speedText;
     }
 
     updateUI();
