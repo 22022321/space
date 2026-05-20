@@ -110,17 +110,16 @@
     let highScore = 0;
     let distance = 0;
 
-    // --- 우주 배경 색상 정의 (실제 화면에 표시되는 미터(m) 기준) ---
+    // --- 우주 배경 색상 정의 (단순 직관화) ---
     const spaceZones = [
-        { distance: 0, colors: ['#05070a', '#1a1a2e', '#16213e'], stars: '#ffffff' },       // 0m ~ 250m (기본 우주)
-        { distance: 250, colors: ['#16213e', '#0f3460', '#1a365d'], stars: '#87ceeb' },     // 250m ~ 750m (진한 파란색 성운)
-        { distance: 750, colors: ['#0f3460', '#2e1a47', '#4a0e4e'], stars: '#ff69b4' },     // 750m ~ 1500m (보라색 우주)
-        { distance: 1500, colors: ['#2e1a47', '#4a0e4e', '#5a1a6f'], stars: '#dda0dd' },    // 1500m ~ 3000m (자주색 은하)
-        { distance: 3000, colors: ['#4a0e4e', '#6b1b6f', '#8b0000'], stars: '#ff1493' },    // 3000m+ (붉은 심연)
+        { distance: 0, colors: ['#05070a', '#131326'], stars: '#ffffff' },       // 0m ~ 250m (검은 우주)
+        { distance: 250, colors: ['#0f172a', '#1e3a8a'], stars: '#87ceeb' },     // 250m ~ 750m (파란 은하)
+        { distance: 750, colors: ['#1e1b4b', '#4c1d95'], stars: '#ff69b4' },     // 750m ~ 1500m (보라 은하)
+        { distance: 1500, colors: ['#3b0764', '#701a75'], stars: '#dda0dd' },    // 1500m ~ 3000m (자주 은하)
+        { distance: 3000, colors: ['#450a0a', '#991b1b'], stars: '#ff1493' },    // 3000m+ (붉은 심연)
     ];
 
     let currentZone = 0;
-    let zoneProgress = 0; 
 
     // --- 로켓 구조체 ---
     let rocket = {
@@ -129,8 +128,7 @@
         width: 24,
         height: 40,
         fuel: 100,
-        maxFuel: 100,
-        targetY: 500
+        maxFuel: 100
     };
 
     // --- 업그레이드 시스템 ---
@@ -140,85 +138,46 @@
         booster: { level: 1, baseCost: 150, pushY: 8 }
     };
 
-    // --- 장애물(운석) 관리 ---
+    // --- 장애물 관리 ---
     let obstacles = [];
     let spawnTimer = 0;
     let giantMeteorTimer = 0; 
     let giantWarningActive = false; 
     let giantWarningX = 0; 
 
-    // --- 조작키 상태 ---
     let keys = { ArrowLeft: false, ArrowRight: false, ArrowUp: false };
 
     window.addEventListener('keydown', e => { if(e.key in keys) keys[e.key] = true; });
     window.addEventListener('keyup', e => { if(e.key in keys) keys[e.key] = false; });
 
-    // --- 우주 존 업데이트 함수 (화면 표시 미터 기준 동기화 버그 수정) ---
+    // --- 우주 존 계산 함수 (절대 오작동 없는 구조) ---
     function updateSpaceZone() {
-        let displayMeters = Math.floor(distance); // 화면에 표시되는 실제 미터 수치
-
+        let displayMeters = Math.floor(distance);
+        
+        // 현재 거리에 맞는 가장 높은 구역 찾기
         for (let i = spaceZones.length - 1; i >= 0; i--) {
             if (displayMeters >= spaceZones[i].distance) {
                 currentZone = i;
-                if (i < spaceZones.length - 1) {
-                    let currentZoneDist = spaceZones[i].distance;
-                    let nextZoneDist = spaceZones[i + 1].distance;
-                    // 실제 노출되는 미터 차이량으로 진행도 계산
-                    zoneProgress = (displayMeters - currentZoneDist) / (nextZoneDist - currentZoneDist);
-                    zoneProgress = Math.min(1, Math.max(0, zoneProgress)); 
-                } else {
-                    zoneProgress = 1;
-                }
                 break;
             }
         }
     }
 
-    // --- 헥사코드를 RGB 객체로 안전하게 변환하는 함수 ---
-    function hexToRgb(hex) {
-        if (hex.length === 4) {
-            hex = "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
-        }
-        const num = parseInt(hex.slice(1), 16);
-        return {
-            r: (num >> 16) & 255,
-            g: (num >> 8) & 255,
-            b: num & 255
-        };
-    }
-
-    // --- 배경 그라데이션 색상 계산 함수 ---
-    function interpolateColor(color1, color2, factor) {
-        const c1 = hexToRgb(color1);
-        const c2 = hexToRgb(color2);
-        
-        const r = Math.round(c1.r + (c2.r - c1.r) * factor);
-        const g = Math.round(c1.g + (c2.g - c1.g) * factor);
-        const b = Math.round(c1.b + (c2.b - c1.b) * factor);
-        
-        return `rgb(${r}, ${g}, ${b})`;
-    }
-
-    // --- 게임 루프 ---
     function update() {
         if (gameState === 'flying') {
             rocket.fuel -= 0.1;
             
             let speedBonus = keys.ArrowUp && rocket.fuel > 0 ? 2 : 1;
-            distance += 0.15 * speedBonus; // 부드러운 거리 증가 가중치 조절
+            distance += 0.15 * speedBonus; 
 
             updateSpaceZone();
 
-            if (rocket.fuel <= 0) {
-                rocket.fuel = 0;
-            }
+            if (rocket.fuel <= 0) rocket.fuel = 0;
 
-            // 로켓 좌우 조작
             let currentMoveSpeed = upgrades.engine.speed + (upgrades.engine.level - 1) * 0.8;
             if (keys.ArrowLeft && rocket.x > 0) rocket.x -= currentMoveSpeed;
             if (keys.ArrowRight && rocket.x < canvas.width - rocket.width) rocket.x += currentMoveSpeed;
 
-            // 로켓 위 조작 (부스터)
             let boosterLimit = 450 - (upgrades.booster.level * 15);
             if (keys.ArrowUp && rocket.fuel > 0 && rocket.y > Math.max(100, boosterLimit)) {
                 rocket.y -= 3;
@@ -227,11 +186,9 @@
                 rocket.y += 2;
             }
 
-            if (rocket.fuel <= 0 && rocket.y < 500) {
-                rocket.y += 3;
-            }
+            if (rocket.fuel <= 0 && rocket.y < 500) rocket.y += 3;
 
-            // 장애물 생성 (난이도 증가 반영)
+            // 장애물 생성 속도 증가 (난이도)
             spawnTimer++;
             let displayMeters = Math.floor(distance);
             let spawnInterval = Math.max(12, 50 - Math.floor(displayMeters * 0.02)); 
@@ -240,7 +197,7 @@
                 spawnTimer = 0;
             }
 
-            // 거대 운석 엔진 (실제 화면 250m 이상부터 작동)
+            // 거대 운석 엔진 (250m 이상 작동)
             if (displayMeters > 250) {
                 giantMeteorTimer++;
                 if (giantMeteorTimer === 450) {
@@ -254,7 +211,7 @@
                 }
             }
 
-            // 장애물 업데이트 및 충돌 검사
+            // 장애물 속도 증가 보너스
             let difficultySpeedBonus = Math.min(8, displayMeters * 0.003);
 
             for (let i = obstacles.length - 1; i >= 0; i--) {
@@ -268,7 +225,6 @@
                     obs.y += obs.speed + difficultySpeedBonus;
                     obs.swayTimer = (obs.swayTimer || 0) + 1;
                     obs.x += Math.sin(obs.swayTimer * 0.12) * 2.5;
-                    
                     if (obs.x < 0) obs.x = 0;
                     if (obs.x + obs.size > canvas.width) obs.x = canvas.width - obs.size;
                 } else {
@@ -329,11 +285,9 @@
 
     function launchRocket() {
         if (gameState !== 'ready') return;
-
         gameState = 'flying';
         distance = 0;
         currentZone = 0;
-        zoneProgress = 0;
         obstacles = [];
         giantMeteorTimer = 0;
         giantWarningActive = false;
@@ -341,7 +295,6 @@
         rocket.y = 500;
         rocket.maxFuel = upgrades.fuel.maxFuel + (upgrades.fuel.level - 1) * 50;
         rocket.fuel = rocket.maxFuel;
-
         document.getElementById('launch-btn').disabled = true;
         toggleUpgradeButtons(false);
     }
@@ -351,7 +304,6 @@
         let finalScore = Math.floor(distance);
         let earnedGold = Math.floor(finalScore * 0.8);
         gold += earnedGold;
-
         if (finalScore > highScore) highScore = finalScore;
 
         setTimeout(() => {
@@ -379,7 +331,6 @@
     function updateUI() {
         document.getElementById('gold-txt').innerText = gold;
         document.getElementById('highscore-txt').innerText = highScore;
-        
         ['engine', 'fuel', 'booster'].forEach(type => {
             document.getElementById(`lvl-${type}`).innerText = upgrades[type].level;
             document.getElementById(`cost-${type}`).innerText = getCost(type);
@@ -395,31 +346,25 @@
 
     function render() {
         let zone = spaceZones[currentZone];
-        let nextZone = spaceZones[currentZone + 1] || zone;
 
-        // 동적으로 변하는 삼중 그라데이션 색상 추출
-        let c1 = interpolateColor(zone.colors[0], nextZone.colors[0], zoneProgress);
-        let c2 = interpolateColor(zone.colors[1], nextZone.colors[1], zoneProgress);
-        let c3 = interpolateColor(zone.colors[2], nextZone.colors[2], zoneProgress);
-
+        // 복잡한 실시간 픽셀 계산을 제거한 확실한 화면 그라데이션
         let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-        gradient.addColorStop(0, c1);
-        gradient.addColorStop(0.5, c2);
-        gradient.addColorStop(1, c3);
+        gradient.addColorStop(0, zone.colors[0]);
+        gradient.addColorStop(1, zone.colors[1]);
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 1. 별 그리기
+        // 별 흐르기 효과
         ctx.fillStyle = zone.stars;
         let starSpeed = keys.ArrowUp && rocket.fuel > 0 ? 8 : 3;
         for (let i = 0; i < 25; i++) {
-            let starY = (i * 45 + distance * (starSpeed * 10)) % canvas.height; // 별 스크롤 속도 현실감 보정
+            let starY = (i * 45 + distance * (starSpeed * 10)) % canvas.height;
             let starX = (i * 87) % canvas.width;
             let starSize = 1 + Math.sin(i * 0.5) * 0.5;
             ctx.fillRect(starX, starY, starSize, starSize);
         }
 
-        // 거대 운석 경고 레이저 선
+        // 거대운석 경고선
         if (gameState === 'flying' && giantWarningActive) {
             ctx.strokeStyle = Math.floor(Date.now() / 100) % 2 === 0 ? 'rgba(255, 0, 0, 0.6)' : 'rgba(255, 0, 0, 0.1)';
             ctx.lineWidth = 4;
@@ -434,7 +379,7 @@
             ctx.textAlign = 'start'; 
         }
 
-        // 2. 장애물 그리기
+        // 장애물
         obstacles.forEach(obs => {
             if (obs.type === 'giant') {
                 let gRad = ctx.createRadialGradient(obs.x + obs.size/2, obs.y + obs.size/2, 10, obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2);
@@ -449,25 +394,12 @@
             } else {
                 ctx.fillStyle = '#718096';
             }
-            
             ctx.beginPath();
             ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2, 0, Math.PI * 2);
             ctx.fill();
-            
-            ctx.fillStyle = obs.type === 'giant' ? '#1c1510' : '#4a5568';
-            ctx.beginPath();
-            ctx.arc(obs.x + obs.size*0.3, obs.y + obs.size*0.4, obs.size*0.15, 0, Math.PI * 2);
-            ctx.fill();
-
-            if (obs.type === 'giant') {
-                ctx.beginPath();
-                ctx.arc(obs.x + obs.size*0.7, obs.y + obs.size*0.3, obs.size*0.12, 0, Math.PI * 2);
-                ctx.arc(obs.x + obs.size*0.5, obs.y + obs.size*0.7, obs.size*0.18, 0, Math.PI * 2);
-                ctx.fill();
-            }
         });
 
-        // 3. 로켓 및 부스터 불꽃 그리기
+        // 로켓 및 불꽃
         if (gameState !== 'gameOver') {
             let rx = rocket.x;
             let ry = rocket.y;
@@ -477,24 +409,13 @@
                     let flameHeight = 35 + Math.random() * 15;
                     let fGrad = ctx.createLinearGradient(rx, ry + rocket.height, rx, ry + rocket.height + flameHeight);
                     fGrad.addColorStop(0, '#ffffff');
-                    fGrad.addColorStop(0.2, '#ffeb3b');
-                    fGrad.addColorStop(0.5, '#ff9800');
+                    fGrad.addColorStop(0.3, '#ff9800');
                     fGrad.addColorStop(1, 'rgba(244, 67, 54, 0)');
-                    
                     ctx.fillStyle = fGrad;
                     ctx.beginPath();
                     ctx.moveTo(rx - 2, ry + rocket.height);
                     ctx.lineTo(rx + rocket.width/2, ry + rocket.height + flameHeight);
                     ctx.lineTo(rx + rocket.width + 2, ry + rocket.height);
-                    ctx.closePath();
-                    ctx.fill();
-
-                    ctx.fillStyle = '#ffffff';
-                    ctx.beginPath();
-                    ctx.moveTo(rx + 5, ry + rocket.height);
-                    ctx.lineTo(rx + rocket.width/2, ry + rocket.height + flameHeight * 0.5);
-                    ctx.lineTo(rx + rocket.width - 5, ry + rocket.height);
-                    ctx.closePath();
                     ctx.fill();
                 } else {
                     ctx.fillStyle = Math.random() > 0.4 ? '#f6e05e' : '#ed8936';
@@ -505,17 +426,12 @@
                     ctx.fill();
                 }
             }
-
             ctx.fillStyle = '#edf2f7';
             ctx.fillRect(rx, ry + 10, rocket.width, rocket.height - 10);
-
             ctx.fillStyle = '#e53e3e';
             ctx.beginPath();
-            ctx.moveTo(rx, ry + 10);
-            ctx.lineTo(rx + rocket.width/2, ry);
-            ctx.lineTo(rx + rocket.width, ry + 10);
+            ctx.moveTo(rx, ry + 10); ctx.lineTo(rx + rocket.width/2, ry); ctx.lineTo(rx + rocket.width, ry + 10);
             ctx.fill();
-
             ctx.fillStyle = '#4a5568';
             ctx.fillRect(rx - 6, ry + rocket.height - 15, 6, 15);
             ctx.fillRect(rx + rocket.width, ry + rocket.height - 15, 6, 15);
