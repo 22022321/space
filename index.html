@@ -98,6 +98,8 @@
         <button id="up-booster-btn" onclick="upgrade('booster')">부스터 (위로대시) Lv.<span id="lvl-booster">1</span><br><span id="cost-booster">150</span>G</button>
         <button id="launch-btn" onclick="launchRocket()">🚀 발사!</button>
     </div>
+    
+    <div id="speed-txt" style="display:none;"></div>
     <div id="controls-guide">조작 방법: 키보드 방향키 [ ← ] [ → ] 좌우 이동 / [ ↑ ] 부스터 전진</div>
 
 <script>
@@ -456,7 +458,7 @@
         
         gameState = 'ready';
         currentEvent = 'none';
-        updateUI(); // 게임 오버 후 대기 상태 UI 리셋
+        updateUI(); 
     }
 
     function launchRocket() {
@@ -483,7 +485,6 @@
         rocket.maxFuel = upgrades.fuel.maxFuel + (upgrades.fuel.level - 1) * 50;
         rocket.fuel = rocket.maxFuel;
         
-        // 비행 중에는 상점 제어 비활성화
         document.getElementById('launch-btn').disabled = true;
         ['engine', 'fuel', 'booster'].forEach(type => {
             document.getElementById(`up-${type}-btn`).disabled = true;
@@ -507,7 +508,6 @@
         document.getElementById('gold-txt').innerText = gold;
         document.getElementById('highscore-txt').innerText = highScore;
         
-        // ready 상태일 때만 골드 보유량에 따라 업그레이드 버튼 활성화 결정
         if (gameState === 'ready') {
             document.getElementById('launch-btn').disabled = false;
             ['engine', 'fuel', 'booster'].forEach(type => {
@@ -684,7 +684,10 @@
         if (keys.ArrowUp && rocket.fuel > 0) speedText = "2X (부스터 가속!)";
         if (currentEvent === 'meteorShower') speedText += " + ✨무한질주!";
         if (currentEvent === 'solarWind') speedText += " + ⚠️조작 반전!";
-        document.getElementById('speed-txt').innerText = speedText;
+        
+        // [수정] DOM 에러를 안전하게 가드 처리
+        let speedEl = document.getElementById('speed-txt');
+        if (speedEl) speedEl.innerText = speedText;
     }
 
     updateUI();
