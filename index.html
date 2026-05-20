@@ -1,0 +1,368 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>로켓 장애물 회피 게임 (Rocket Dodger)</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #0b0e14;
+            color: #ffffff;
+            font-family: 'Malgun Gothic', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.6);
+        }
+        canvas {
+            background: #05070a;
+            border-radius: 8px;
+            display: block;
+        }
+        #ui-panel {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            font-size: 16px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px black;
+        }
+        #upgrade-menu {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            background: #161a24;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #2d3748;
+        }
+        button {
+            background: #3182ce;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        button:hover { background: #2b6cb0; }
+        button:disabled {
+            background: #4a5568;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        #launch-btn {
+            background: #e53e3e;
+            padding: 10px 25px;
+        }
+        #launch-btn:hover { background: #c53030; }
+        #controls-guide {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="ui-panel">
+            <div id="stats-left">
+                보유 골드: <span id="gold-txt">0</span> G<br>
+                최고 점수: <span id="highscore-txt">0</span> m
+            </div>
+            <div id="stats-right" style="text-align: right;">
+                비행 거리: <span id="dist-txt">0</span> m<br>
+                남은 연료: <span id="fuel-txt">100</span>%<br>
+                보너스 속도: <span id="speed-txt">0</span>
+            </div>
+        </div>
+        <canvas id="gameCanvas" width="450" height="600"></canvas>
+    </div>
+
+    <div id="upgrade-menu">
+        <button id="up-engine-btn" onclick="upgrade('engine')">엔진 (좌우속도) Lv.<span id="lvl-engine">1</span><br><span id="cost-engine">100</span>G</button>
+        <button id="up-fuel-btn" onclick="upgrade('fuel')">연료 (비행시간) Lv.<span id="lvl-fuel">1</span><br><span id="cost-fuel">120</span>G</button>
+        <button id="up-booster-btn" onclick="upgrade('booster')">부스터 (위로대시) Lv.<span id="lvl-booster">1</span><br><span id="cost-booster">150</span>G</button>
+        <button id="launch-btn" onclick="launchRocket()">🚀 발사!</button>
+    </div>
+    <div id="controls-guide">조작 방법: 키보드 방향키 [ ← ] [ → ] 좌우 이동 / [ ↑ ] 부스터 전진</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- 게임 상태 관리 ---
+    let gameState = 'ready'; // ready, flying, gameOver
+    let gold = 300; 
+    let highScore = 0;
+    let distance = 0;
+
+    // --- 로켓 구조체 ---
+    let rocket = {
+        x: 225,
+        y: 500,
+        width: 24,
+        height: 40,
+        fuel: 100,
+        maxFuel: 100,
+        targetY: 500 // 위 방향키 입력 시 이동할 목표 Y축
+    };
+
+    // --- 업그레이드 시스템 ---
+    let upgrades = {
+        engine: { level: 1, baseCost: 100, speed: 4 },      // 좌우 이동 속도 증가
+        fuel: { level: 1, baseCost: 120, maxFuel: 200 },    // 연료통 충전량 (더 오래 버팀)
+        booster: { level: 1, baseCost: 150, pushY: 8 }      // 위쪽 방향키를 누를 때 올라가는 한계치 및 반응성
+    };
+
+    // --- 장애물(운석) 관리 ---
+    let obstacles = [];
+    let spawnTimer = 0;
+
+    // --- 조작키 상태 ---
+    let keys = { ArrowLeft: false, ArrowRight: false, ArrowUp: false };
+
+    window.addEventListener('keydown', e => { if(e.key in keys) keys[e.key] = true; });
+    window.addEventListener('keyup', e => { if(e.key in keys) keys[e.key] = false; });
+
+    // --- 게임 루프 ---
+    function update() {
+        if (gameState === 'flying') {
+            // 1. 연료 감소 및 거리 증가
+            rocket.fuel -= 0.1;
+            
+            // 앞으로 전진하는 기본 거리 계산 (기본 1 + 위쪽 부스터 쓰고 있으면 추가 가속)
+            let speedBonus = keys.ArrowUp && rocket.fuel > 0 ? 2 : 1;
+            distance += 0.2 * speedBonus;
+
+            if (rocket.fuel <= 0) {
+                rocket.fuel = 0;
+            }
+
+            // 2. 로켓 조작 (좌우 이동 - 엔진 레벨 비례)
+            let currentMoveSpeed = upgrades.engine.speed + (upgrades.engine.level - 1) * 0.8;
+            if (keys.ArrowLeft && rocket.x > 0) {
+                rocket.x -= currentMoveSpeed;
+            }
+            if (keys.ArrowRight && rocket.x < canvas.width - rocket.width) {
+                rocket.x += currentMoveSpeed;
+            }
+
+            // 3. 로켓 조작 (위로 이동 - 부스터 레벨 비례)
+            // 위쪽 키를 누르면 연료를 조금 더 써서 화면 위쪽으로 전진해 장애물을 먼저 피할 공간을 확보합니다.
+            let boosterLimit = 450 - (upgrades.booster.level * 15); // 업글할수록 더 위로 올라감
+            if (keys.ArrowUp && rocket.fuel > 0 && rocket.y > Math.max(100, boosterLimit)) {
+                rocket.y -= 3;
+                rocket.fuel -= 0.05; // 부스터 추가 연료 소모
+            } else if (rocket.y < 500) {
+                rocket.y += 2; // 키를 떼면 중력 때문에 기본 위치로 서서히 내려옴
+            }
+
+            // 연료가 아예 없으면 기본 위치로 강제 추락
+            if (rocket.fuel <= 0 && rocket.y < 500) {
+                rocket.y += 3;
+            }
+
+            // 4. 장애물 생성 및 관리 (이동 거리가 늘어날수록 생성 속도가 빨라짐)
+            spawnTimer++;
+            let spawnInterval = Math.max(20, 60 - Math.floor(distance * 0.05));
+            if (spawnTimer > spawnInterval) {
+                spawnObstacle();
+                spawnTimer = 0;
+            }
+
+            // 장애물 움직임 업데이트 (아래로 내려옴)
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                // 거리가 늘어날수록 내려오는 장애물 속도 가속
+                obs.y += obs.speed + Math.min(5, distance * 0.01); 
+
+                // 화면 밖으로 나가면 삭제
+                if (obs.y > canvas.height) {
+                    obstacles.splice(i, 1);
+                    continue;
+                }
+
+                // 5. 충돌 체크 (AABB 박스 충돌 연산)
+                if (rocket.x < obs.x + obs.size &&
+                    rocket.x + rocket.width > obs.x &&
+                    rocket.y < obs.y + obs.size &&
+                    rocket.y + rocket.height > obs.y) {
+                    
+                    explodeRocket(); // 충돌 시 사망
+                }
+            }
+        }
+
+        render();
+        requestAnimationFrame(update);
+    }
+
+    // --- 장애물 생성 함수 ---
+    function spawnObstacle() {
+        let size = Math.random() * 20 + 20; // 20~40 크기
+        obstacles.push({
+            x: Math.random() * (canvas.width - size),
+            y: -size,
+            size: size,
+            speed: Math.random() * 2 + 3 // 기본 속도 3~5
+        });
+    }
+
+    // --- 발사 버튼 ---
+    function launchRocket() {
+        if (gameState !== 'ready') return;
+
+        gameState = 'flying';
+        distance = 0;
+        obstacles = [];
+        rocket.x = canvas.width / 2 - rocket.width / 2;
+        rocket.y = 500;
+        // 연료 최대치는 연료 업그레이드 레벨에 비례
+        rocket.maxFuel = upgrades.fuel.maxFuel + (upgrades.fuel.level - 1) * 50;
+        rocket.fuel = rocket.maxFuel;
+
+        document.getElementById('launch-btn').disabled = true;
+        toggleUpgradeButtons(false);
+    }
+
+    // --- 충돌 및 사망 처리 ---
+    function explodeRocket() {
+        gameState = 'gameOver';
+        
+        // 생존 거리(Score)를 기반으로 골드 정산
+        let finalScore = Math.floor(distance);
+        let earnedGold = Math.floor(finalScore * 0.8);
+        gold += earnedGold;
+
+        if (finalScore > highScore) {
+            highScore = finalScore;
+        }
+
+        setTimeout(() => {
+            alert(`💥 쿠우웅! 장애물과 충돌했습니다!\n\n비행 기록: ${finalScore}m\n획득 골드: ${earnedGold}G`);
+            gameState = 'ready';
+            document.getElementById('launch-btn').disabled = false;
+            toggleUpgradeButtons(true);
+            updateUI();
+        }, 10);
+    }
+
+    // --- 업그레이드 로직 ---
+    function upgrade(type) {
+        let cost = getCost(type);
+        if (gold >= cost) {
+            gold -= cost;
+            upgrades[type].level++;
+            updateUI();
+        }
+    }
+
+    function getCost(type) {
+        return Math.floor(upgrades[type].baseCost * Math.pow(1.4, upgrades[type].level - 1));
+    }
+
+    // --- UI 동기화 ---
+    function updateUI() {
+        document.getElementById('gold-txt').innerText = gold;
+        document.getElementById('highscore-txt').innerText = highScore;
+        
+        ['engine', 'fuel', 'booster'].forEach(type => {
+            document.getElementById(`lvl-${type}`).innerText = upgrades[type].level;
+            document.getElementById(`cost-${type}`).innerText = getCost(type);
+            document.getElementById(`up-${type}-btn`).disabled = (gold < getCost(type));
+        });
+    }
+
+    function toggleUpgradeButtons(enabled) {
+        ['engine', 'fuel', 'booster'].forEach(type => {
+            document.getElementById(`up-${type}-btn`).disabled = !enabled || (gold < getCost(type));
+        });
+    }
+
+    // --- 그래픽 렌더링 ---
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 밤하늘 흐르는 별 연출 (속도감)
+        ctx.fillStyle = '#ffffff';
+        let starSpeed = keys.ArrowUp && rocket.fuel > 0 ? 8 : 3;
+        for (let i = 0; i < 20; i++) {
+            let starY = (i * 45 + distance * (starSpeed * 2)) % canvas.height;
+            let starX = (i * 87) % canvas.width;
+            ctx.fillRect(starX, starY, 2, 2);
+        }
+
+        // 2. 장애물(운석) 그리기
+        obstacles.forEach(obs => {
+            ctx.fillStyle = '#718096'; // 바위색
+            ctx.beginPath();
+            ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 운석 디테일 (크레이터)
+            ctx.fillStyle = '#4a5568';
+            ctx.beginPath();
+            ctx.arc(obs.x + obs.size*0.3, obs.y + obs.size*0.4, obs.size*0.15, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // 3. 로켓 그리기 (게임 오버가 아닐 때만)
+        if (gameState !== 'gameOver') {
+            let rx = rocket.x;
+            let ry = rocket.y;
+
+            // 부스터 및 엔진 화염 효과
+            if (gameState === 'flying' && rocket.fuel > 0) {
+                ctx.fillStyle = Math.random() > 0.4 ? '#f6e05e' : '#ed8936';
+                ctx.beginPath();
+                ctx.moveTo(rx + 4, ry + rocket.height);
+                ctx.lineTo(rx + rocket.width/2, ry + rocket.height + (keys.ArrowUp ? 25 : 12) + Math.random()*8);
+                ctx.lineTo(rx + rocket.width - 4, ry + rocket.height);
+                ctx.fill();
+            }
+
+            // 로켓 몸통
+            ctx.fillStyle = '#edf2f7';
+            ctx.fillRect(rx, ry + 10, rocket.width, rocket.height - 10);
+
+            // 로켓 머리 (빨간 고깔)
+            ctx.fillStyle = '#e53e3e';
+            ctx.beginPath();
+            ctx.moveTo(rx, ry + 10);
+            ctx.lineTo(rx + rocket.width/2, ry);
+            ctx.lineTo(rx + rocket.width, ry + 10);
+            ctx.fill();
+
+            // 로켓 날개
+            ctx.fillStyle = '#4a5568';
+            ctx.fillRect(rx - 6, ry + rocket.height - 15, 6, 15);
+            ctx.fillRect(rx + rocket.width, ry + rocket.height - 15, 6, 15);
+        }
+
+        // 실시간 텍스트 UI 업데이트 데이터 계산
+        let fuelPercent = Math.max(0, Math.ceil((rocket.fuel / rocket.maxFuel) * 100));
+        document.getElementById('dist-txt').innerText = Math.floor(distance);
+        document.getElementById('fuel-txt').innerText = fuelPercent;
+        document.getElementById('speed-txt').innerText = keys.ArrowUp && rocket.fuel > 0 ? "2X (부스터 가속!)" : "1X (기본)";
+    }
+
+    // 초기화 실행
+    updateUI();
+    update();
+</script>
+</body>
+</html>
