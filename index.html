@@ -110,6 +110,21 @@
     let highScore = 0;
     let distance = 0;
 
+    // --- 우주 배경 색상 정의 (거리별 그라데이션) ---
+    const spaceZones = [
+        { distance: 0, colors: ['#05070a', '#1a1a2e', '#16213e'], stars: '#ffffff' },          // 깊은 파란색 (0~500m)
+        { distance: 500, colors: ['#16213e', '#0f3460', '#16213e'], stars: '#87ceeb' },       // 진한 파란색 (500~1500m)
+        { distance: 1500, colors: ['#0f3460', '#2e1a47', '#4a0e4e'], stars: '#ff69b4' },     // 보라색 (1500~2500m)
+        { distance: 2500, colors: ['#2e1a47', '#4a0e4e', '#5a1a6f'], stars: '#dda0dd' },     // 자주색 (2500~4000m)
+        { distance: 4000, colors: ['#4a0e4e', '#6b1b6f', '#8b0000'], stars: '#ff1493' },     // 진분홍 (4000~5500m)
+        { distance: 5500, colors: ['#6b1b6f', '#8b0000', '#ff4500'], stars: '#ffa500' },     // 주황색 (5500~7000m)
+        { distance: 7000, colors: ['#8b0000', '#ff4500', '#ffd700'], stars: '#ffff00' },     // 노란색 (7000m+)
+    ];
+
+    // 현재 우주 배경 상태
+    let currentZone = 0;
+    let zoneProgress = 0; // 0~1 사이의 값 (다음 존으로의 진행도)
+
     // --- 로켓 구조체 ---
     let rocket = {
         x: 225,
@@ -118,14 +133,14 @@
         height: 40,
         fuel: 100,
         maxFuel: 100,
-        targetY: 500 // 위 방향키 입력 시 이동할 목표 Y축
+        targetY: 500
     };
 
     // --- 업그레이드 시스템 ---
     let upgrades = {
-        engine: { level: 1, baseCost: 100, speed: 4 },      // 좌우 이동 속도 증가
-        fuel: { level: 1, baseCost: 120, maxFuel: 200 },    // 연료통 충전량 (더 오래 버팀)
-        booster: { level: 1, baseCost: 150, pushY: 8 }      // 위쪽 방향키를 누를 때 올라가는 한계치 및 반응성
+        engine: { level: 1, baseCost: 100, speed: 4 },
+        fuel: { level: 1, baseCost: 120, maxFuel: 200 },
+        booster: { level: 1, baseCost: 150, pushY: 8 }
     };
 
     // --- 장애물(운석) 관리 ---
@@ -138,21 +153,76 @@
     window.addEventListener('keydown', e => { if(e.key in keys) keys[e.key] = true; });
     window.addEventListener('keyup', e => { if(e.key in keys) keys[e.key] = false; });
 
+    // --- 우주 존 업데이트 함수 ---
+    function updateSpaceZone() {
+        // 거리에 따라 현재 존 결정
+        for (let i = spaceZones.length - 1; i >= 0; i--) {
+            if (distance >= spaceZones[i].distance) {
+                if (i < spaceZones.length - 1) {
+                    // 다음 존으로의 진행도 계산
+                    let nextZoneDistance = spaceZones[i + 1].distance;
+                    zoneProgress = (distance - spaceZones[i].distance) / (nextZoneDistance - spaceZones[i].distance);
+                    zoneProgress = Math.min(1, Math.max(0, zoneProgress)); // 0~1 범위로 제한
+                    currentZone = i;
+                } else {
+                    zoneProgress = 1;
+                    currentZone = i;
+                }
+                break;
+            }
+        }
+    }
+
+    // --- 배경 그라데이션 색상 계산 함수 ---
+    function interpolateColor(color1, color2, factor) {
+        const c1 = parseInt(color1.slice(1), 16);
+        const c2 = parseInt(color2.slice(1), 16);
+        
+        const r1 = (c1 >> 16) & 255;
+        const g1 = (c1 >> 8) & 255;
+        const b1 = c1 & 255;
+        
+        const r2 = (c2 >> 16) & 255;
+        const g2 = (c2 >> 8) & 255;
+        const b2 = c2 & 255;
+        
+        const r = Math.round(r1 + (r2 - r1) * factor);
+        const g = Math.round(g1 + (g2 - g1) * factor);
+        const b = Math.round(b1 + (b2 - b1) * factor);
+        
+        return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    // --- 현재 배경 색상 반환 함수 ---
+    function getCurrentBackgroundColor() {
+        const zone = spaceZones[currentZone];
+        if (currentZone < spaceZones.length - 1) {
+            const nextZone = spaceZones[currentZone + 1];
+            // 두 존 사이에서 보간
+            const color1 = interpolateColor(zone.colors[0], zone.colors[1], 0.5);
+            const color2 = interpolateColor(nextZone.colors[0], nextZone.colors[1], 0.5);
+            return interpolateColor(color1, color2, zoneProgress);
+        }
+        return zone.colors[0];
+    }
+
     // --- 게임 루프 ---
     function update() {
         if (gameState === 'flying') {
             // 1. 연료 감소 및 거리 증가
             rocket.fuel -= 0.1;
             
-            // 앞으로 전진하는 기본 거리 계산 (기본 1 + 위쪽 부스터 쓰고 있으면 추가 가속)
             let speedBonus = keys.ArrowUp && rocket.fuel > 0 ? 2 : 1;
             distance += 0.2 * speedBonus;
+
+            // 우주 존 업데이트
+            updateSpaceZone();
 
             if (rocket.fuel <= 0) {
                 rocket.fuel = 0;
             }
 
-            // 2. 로켓 조작 (좌우 이동 - 엔진 레벨 비례)
+            // 2. 로켓 조작 (좌우 이동)
             let currentMoveSpeed = upgrades.engine.speed + (upgrades.engine.level - 1) * 0.8;
             if (keys.ArrowLeft && rocket.x > 0) {
                 rocket.x -= currentMoveSpeed;
@@ -161,22 +231,20 @@
                 rocket.x += currentMoveSpeed;
             }
 
-            // 3. 로켓 조작 (위로 이동 - 부스터 레벨 비례)
-            // 위쪽 키를 누르면 연료를 조금 더 써서 화면 위쪽으로 전진해 장애물을 먼저 피할 공간을 확보합니다.
-            let boosterLimit = 450 - (upgrades.booster.level * 15); // 업글할수록 더 위로 올라감
+            // 3. 로켓 조작 (위로 이동 - 부스터)
+            let boosterLimit = 450 - (upgrades.booster.level * 15);
             if (keys.ArrowUp && rocket.fuel > 0 && rocket.y > Math.max(100, boosterLimit)) {
                 rocket.y -= 3;
-                rocket.fuel -= 0.05; // 부스터 추가 연료 소모
+                rocket.fuel -= 0.05;
             } else if (rocket.y < 500) {
-                rocket.y += 2; // 키를 떼면 중력 때문에 기본 위치로 서서히 내려옴
+                rocket.y += 2;
             }
 
-            // 연료가 아예 없으면 기본 위치로 강제 추락
             if (rocket.fuel <= 0 && rocket.y < 500) {
                 rocket.y += 3;
             }
 
-            // 4. 장애물 생성 및 관리 (이동 거리가 늘어날수록 생성 속도가 빨라짐)
+            // 4. 장애물 생성
             spawnTimer++;
             let spawnInterval = Math.max(20, 60 - Math.floor(distance * 0.05));
             if (spawnTimer > spawnInterval) {
@@ -184,25 +252,35 @@
                 spawnTimer = 0;
             }
 
-            // 장애물 움직임 업데이트 (아래로 내려옴)
+            // 5. 장애물 업데이트 및 충돌 체크
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let obs = obstacles[i];
-                // 거리가 늘어날수록 내려오는 장애물 속도 가속
-                obs.y += obs.speed + Math.min(5, distance * 0.01); 
+                
+                // 장애물 타입별 움직임
+                if (obs.type === 'fast') {
+                    obs.y += (obs.speed + 3) + Math.min(5, distance * 0.01);
+                } else if (obs.type === 'sway') {
+                    obs.y += obs.speed + Math.min(5, distance * 0.01);
+                    obs.swayTimer = (obs.swayTimer || 0) + 1;
+                    obs.x += Math.sin(obs.swayTimer * 0.1) * 2;
+                    
+                    if (obs.x < 0) obs.x = 0;
+                    if (obs.x + obs.size > canvas.width) obs.x = canvas.width - obs.size;
+                } else {
+                    obs.y += obs.speed + Math.min(5, distance * 0.01);
+                }
 
-                // 화면 밖으로 나가면 삭제
                 if (obs.y > canvas.height) {
                     obstacles.splice(i, 1);
                     continue;
                 }
 
-                // 5. 충돌 체크 (AABB 박스 충돌 연산)
+                // 충돌 체크
                 if (rocket.x < obs.x + obs.size &&
                     rocket.x + rocket.width > obs.x &&
                     rocket.y < obs.y + obs.size &&
                     rocket.y + rocket.height > obs.y) {
-                    
-                    explodeRocket(); // 충돌 시 사망
+                    explodeRocket();
                 }
             }
         }
@@ -213,12 +291,27 @@
 
     // --- 장애물 생성 함수 ---
     function spawnObstacle() {
-        let size = Math.random() * 20 + 20; // 20~40 크기
+        let size = Math.random() * 20 + 20;
+        
+        let obstacleType = 'normal';
+        let difficultyChance = Math.min(0.6, distance * 0.001);
+        
+        if (Math.random() < difficultyChance) {
+            let typeRoll = Math.random();
+            if (typeRoll < 0.5) {
+                obstacleType = 'fast';
+            } else {
+                obstacleType = 'sway';
+            }
+        }
+        
         obstacles.push({
             x: Math.random() * (canvas.width - size),
             y: -size,
             size: size,
-            speed: Math.random() * 2 + 3 // 기본 속도 3~5
+            speed: Math.random() * 2 + 3,
+            type: obstacleType,
+            swayTimer: 0
         });
     }
 
@@ -228,10 +321,11 @@
 
         gameState = 'flying';
         distance = 0;
+        currentZone = 0;
+        zoneProgress = 0;
         obstacles = [];
         rocket.x = canvas.width / 2 - rocket.width / 2;
         rocket.y = 500;
-        // 연료 최대치는 연료 업그레이드 레벨에 비례
         rocket.maxFuel = upgrades.fuel.maxFuel + (upgrades.fuel.level - 1) * 50;
         rocket.fuel = rocket.maxFuel;
 
@@ -243,7 +337,6 @@
     function explodeRocket() {
         gameState = 'gameOver';
         
-        // 생존 거리(Score)를 기반으로 골드 정산
         let finalScore = Math.floor(distance);
         let earnedGold = Math.floor(finalScore * 0.8);
         gold += earnedGold;
@@ -295,37 +388,55 @@
 
     // --- 그래픽 렌더링 ---
     function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // 현재 배경 색상 적용
+        let bgColor = getCurrentBackgroundColor();
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // 1. 밤하늘 흐르는 별 연출 (속도감)
-        ctx.fillStyle = '#ffffff';
+        // 동적 그라데이션 배경 추가 (깊이감)
+        let gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        let zone = spaceZones[currentZone];
+        gradient.addColorStop(0, zone.colors[0]);
+        gradient.addColorStop(0.5, zone.colors[1]);
+        gradient.addColorStop(1, zone.colors[2]);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 별 연출 (색상도 동적 변경)
+        ctx.fillStyle = zone.stars;
         let starSpeed = keys.ArrowUp && rocket.fuel > 0 ? 8 : 3;
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 25; i++) {
             let starY = (i * 45 + distance * (starSpeed * 2)) % canvas.height;
             let starX = (i * 87) % canvas.width;
-            ctx.fillRect(starX, starY, 2, 2);
+            let starSize = 1 + Math.sin(i * 0.5) * 0.5; // 별이 반짝이는 효과
+            ctx.fillRect(starX, starY, starSize, starSize);
         }
 
-        // 2. 장애물(운석) 그리기
+        // 2. 장애물 그리기
         obstacles.forEach(obs => {
-            ctx.fillStyle = '#718096'; // 바위색
+            if (obs.type === 'fast') {
+                ctx.fillStyle = '#fc8181';
+            } else if (obs.type === 'sway') {
+                ctx.fillStyle = '#fbd38d';
+            } else {
+                ctx.fillStyle = '#718096';
+            }
+            
             ctx.beginPath();
             ctx.arc(obs.x + obs.size/2, obs.y + obs.size/2, obs.size/2, 0, Math.PI * 2);
             ctx.fill();
             
-            // 운석 디테일 (크레이터)
             ctx.fillStyle = '#4a5568';
             ctx.beginPath();
             ctx.arc(obs.x + obs.size*0.3, obs.y + obs.size*0.4, obs.size*0.15, 0, Math.PI * 2);
             ctx.fill();
         });
 
-        // 3. 로켓 그리기 (게임 오버가 아닐 때만)
+        // 3. 로켓 그리기
         if (gameState !== 'gameOver') {
             let rx = rocket.x;
             let ry = rocket.y;
 
-            // 부스터 및 엔진 화염 효과
             if (gameState === 'flying' && rocket.fuel > 0) {
                 ctx.fillStyle = Math.random() > 0.4 ? '#f6e05e' : '#ed8936';
                 ctx.beginPath();
@@ -335,11 +446,9 @@
                 ctx.fill();
             }
 
-            // 로켓 몸통
             ctx.fillStyle = '#edf2f7';
             ctx.fillRect(rx, ry + 10, rocket.width, rocket.height - 10);
 
-            // 로켓 머리 (빨간 고깔)
             ctx.fillStyle = '#e53e3e';
             ctx.beginPath();
             ctx.moveTo(rx, ry + 10);
@@ -347,20 +456,17 @@
             ctx.lineTo(rx + rocket.width, ry + 10);
             ctx.fill();
 
-            // 로켓 날개
             ctx.fillStyle = '#4a5568';
             ctx.fillRect(rx - 6, ry + rocket.height - 15, 6, 15);
             ctx.fillRect(rx + rocket.width, ry + rocket.height - 15, 6, 15);
         }
 
-        // 실시간 텍스트 UI 업데이트 데이터 계산
         let fuelPercent = Math.max(0, Math.ceil((rocket.fuel / rocket.maxFuel) * 100));
         document.getElementById('dist-txt').innerText = Math.floor(distance);
         document.getElementById('fuel-txt').innerText = fuelPercent;
         document.getElementById('speed-txt').innerText = keys.ArrowUp && rocket.fuel > 0 ? "2X (부스터 가속!)" : "1X (기본)";
     }
 
-    // 초기화 실행
     updateUI();
     update();
 </script>
